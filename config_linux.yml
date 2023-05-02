@@ -1,0 +1,100 @@
+use_cuda: true
+train_opt:
+  seed:
+    # 设置set为true 来人工设置选定的随机seed
+    set: true
+    num: 123
+  # number of threads for data loader to use
+  num_workers: 4
+  batch_size: 5
+  channel:
+    input: 3
+    output: 3
+  # 'the starting epoch count, we save the model by <starting_epoch>, <starting_epoch>+<save_latest_freq>
+  starting_epoch: 0
+  # 总共训练多少epoch
+  train_n_epochs: 101
+  G:
+    # Number of Generator Filters in first conv layer
+    ngf: 64
+    net_G_type: resnet_9blocks
+    # init_type normal xavier kaiming orthogonal
+    G_init_type: normal
+    use_dropout: false
+  D:
+    # Number of Discriminator Filters in first conv layer
+    ndf: 64
+    # basic n_layers
+    net_D_type: basic
+    # if net_D_type is n_layers , this option will be activated default = 3
+    n_layers: 3
+    D_init_type: normal
+  loss:
+    # lsgan vanilla
+    mode: lsgan
+    g_loss:
+      - name: l1
+        # 1e-2 * weight
+        weight: 10
+      - name: ssim
+        weight: 2
+      - name: ms_ssim
+        weight: 2
+  optim:
+    # IMPORTANT: modify it every time resume training value = the last epoch lr
+    g_learning_rate: 1e-3
+    d_learning_rate: 1e-3
+    # IMPORTANT: modify it every time resume training value = the last epoch num
+    # -1 means a new start
+    last_epoch: -1
+    betas:
+      beta1: 0.5
+      beta2: 0.999
+    # [linear,step,plateau,cosine]
+    policy:
+      - cosine
+#      - linear
+#      - plateau
+    linear:
+      # when policy is linear, the learning rate will be invariant until [total training epoch] = [n_epoch_start_decay] + [n_decay_iter]
+      n_epoch_start_decay: 50
+      n_decay_iter: 100
+    step:
+      # each [n_epoch_decay_frequency] epochs , lr = lr*[step_rate]
+      n_epoch_decay_frequency: 30
+      step_rate: 0.1
+    plateau:
+      # [epoch[n]-epoch[n-[patience]]]<patience and epochs_that_without_optim > cool_down and change > eps
+      #  lr = lr * factor
+      patience: 5
+      cool_down: 10
+      eps: 1e-10
+      threshold: 1e-2
+      factor: 0.2
+    cosine:
+      # too complicated
+      eta_min: 0
+  l1:
+    # 决定l1的比重，也就是MAE的比重
+    weight: 10
+  save_opt:
+    root_path: /home/heng/DATA/projects/save_data/pix2pix
+    save_model:
+      activate: true
+      frequency: 2
+      save_example:
+        activate: true
+        num: 5
+  continue_train_opt:
+    activate: false
+    g_model_path: path
+    d_model_path: path
+dataset_opt:
+  # train dataset: {root_path}/{dataset_name}/train}
+  root_path: /home/heng/DATA/datasets/pix2pix
+  use_aug: false
+  dataset_name: ect-large
+  # 对应文件夹下由a文件夹到b文件夹
+  direction: b2a
+  # 设置为Ture则在训练之前将变换好的图片存在内存中，速度更快但是内存占用更高
+  ram_cache: false
