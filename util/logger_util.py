@@ -39,4 +39,5 @@ def init_logger(dir):
 
 
 def get_logger():
+
     return logger

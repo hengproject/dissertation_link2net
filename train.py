@@ -1,13 +1,20 @@
+import os.path
+from time import sleep
+
 import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
 import torch.backends.cudnn as cudnn
 from copy import deepcopy
+
+from torch.utils.tensorboard import SummaryWriter
+
 from network.loss import GANLoss, MixedIndicationLoss
 from network.public import get_schedulers, update_learning_rate
 from util import logger_util, visualize_util
 from util.time_util import time_start, time_end, time_end_as_minutes
-from util.save_util import init_save, check_point_save
+from util.save_util import init_save, check_point_save, get_kwarg
+from util.tenserboard_util import tensorboard_save
 from util.load_util import yaml_plain_loader as config_loader
 from util.load_util import load_checkpoint
 from data.ect_dataset import get_train_dataset, get_test_dataset
@@ -15,11 +22,8 @@ from network.network_getter import define_G, define_D
 import argparse
 
 
-def run():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--yaml',type=str,help='the path of config.yml',default='./config.yml')
-    args = parser.parse_args()
-    config = config_loader(args.yaml)
+def run(config):
+
 
     train_opt = config['train_opt']
     dataset_opt = config['dataset_opt']
@@ -57,16 +61,16 @@ def run():
     use_aug = dataset_opt['use_aug']
     log.debug(f"root_path is {root_path}/{dataset_name}")
     # 返回一个数组 0 为 目标图像 1 为输入图像
-    train_dataset = get_train_dataset(root_path, dataset_name, direction, ram_cached=ram_cached,use_augment=use_aug)
+    train_dataset = get_train_dataset(root_path, dataset_name, direction, ram_cached=ram_cached, use_augment=use_aug)
     test_dataset = get_test_dataset(root_path, dataset_name, direction, ram_cached=False)
     log.info(f'===> Loading datasets process done, using {time_end(timer)} ms ; {time_end_as_minutes(timer)} minutes')
     num_workers = train_opt['num_workers']
     batch_size = train_opt['batch_size']
     # after this, data input = a , output = b
     training_data_loader = DataLoader(dataset=train_dataset, num_workers=num_workers, batch_size=batch_size,
-                                      shuffle=True)
+                                      shuffle=True, pin_memory=False)
     testing_data_loader = DataLoader(dataset=test_dataset, num_workers=num_workers, batch_size=1,
-                                     shuffle=False)
+                                     shuffle=False, pin_memory=False)
     log.info('===> Building models process start')
 
     input_channel = train_opt['channel']['input']
@@ -93,8 +97,7 @@ def run():
 
     loss_mode = train_opt['loss']['mode']
     criterionGAN = GANLoss(gan_mode=loss_mode).to(device)
-    criterionGLoss = MixedIndicationLoss(train_opt['loss']['g_loss']).to(device)
-    criterionL1 = torch.nn.L1Loss().to(device)
+    criterionGLoss = MixedIndicationLoss(train_opt['loss']['g_loss'], device).to(device)
 
     # optimizer
     g_lr = float(train_opt['optim']['g_learning_rate'])
@@ -110,9 +113,8 @@ def run():
 
     if train_opt['continue_train_opt']['activate']:
         continue_train_opt = train_opt['continue_train_opt']
-        load_checkpoint(continue_train_opt['g_model_path'],net_generator,optimizer_g,device)
-        load_checkpoint(continue_train_opt['d_model_path'],net_discriminator,optimizer_d,device)
-
+        load_checkpoint(continue_train_opt['g_model_path'], net_generator, optimizer_g, device)
+        load_checkpoint(continue_train_opt['d_model_path'], net_discriminator, optimizer_d, device)
 
     # last epoch will be inherited here
     net_g_schedulers = get_schedulers(optimizer_g, config)
@@ -120,13 +122,20 @@ def run():
 
     start_epoch = int(train_opt['starting_epoch'])
     end_epoch = start_epoch + int(train_opt['train_n_epochs'])
-
+    best_ms_ssim = 0.0
     log.info("training start")
+    writer = SummaryWriter(os.path.join(save_dir, "tensor_logs"), flush_secs=1)
     for epoch in range(start_epoch, end_epoch):
+        log.info(
+            f"===> Epoch[{epoch}] start training")
+
         training_data_loader_len = len(training_data_loader)
         epoch_timer = time_start()
         epoch_d_loss = 0.0
         epoch_g_loss = 0.0
+        epoch_ms_ssim = 0.0
+        epoch_ssim = 0.0
+        epoch_l1 = 0.0
         # train
         for iteration, batch in enumerate(training_data_loader, start=0):
             iter_timer = time_start()
@@ -166,17 +175,27 @@ def run():
             loss_g_from_gan = criterionGAN(prediction=prediction_fake, target_is_real=True)
 
             # 3.2 Creates a criterion that measures the mean absolute error (MAE) between each element in the input x and target y
-            loss_g_from_l1 = criterionL1(fake_b, real_b) * float(train_opt['l1']['weight'])
-            loss_g = loss_g_from_gan + loss_g_from_l1
+            loss_g_mixed = criterionGLoss(fake_b, real_b)
+            loss_g = loss_g_from_gan + loss_g_mixed
             loss_g.backward()
             optimizer_g.step()
             # end of batch
             loss_d_item = loss_d.item()
             loss_g_item = loss_g.item()
+            ms_ssim_item = criterionGLoss.ms_ssim.item()
+            ssim_item = criterionGLoss.ssim.item()
+            l1_item = criterionGLoss.l1.item()
             epoch_d_loss += loss_d_item
             epoch_g_loss += loss_g_item
+            epoch_ms_ssim += ms_ssim_item
+            epoch_ssim += ssim_item
+            epoch_l1 += l1_item
             log.debug(
                 f"===> Epoch[{epoch}]({iteration}/{training_data_loader_len}): Loss_D:{round(loss_d_item, 5)} loss_G:{round(loss_g_item, 5)}  using {time_end(iter_timer)} ms")
+        epoch_ms_ssim = epoch_ms_ssim / training_data_loader_len
+        epoch_ssim = epoch_ssim / training_data_loader_len
+        epoch_l1 = epoch_l1 / training_data_loader_len
+
         # end of epoch
         g_lr = update_learning_rate(net_g_schedulers, optimizer_g, round(epoch_g_loss / training_data_loader_len, 5))
         d_lr = update_learning_rate(net_d_schedulers, optimizer_d, round(epoch_d_loss / training_data_loader_len, 5))
@@ -185,14 +204,31 @@ def run():
         log.info(
             f"===> Epoch[{epoch}]: learning rate for next epoch：G_learning_rate:{g_lr},D_learning_rate:{d_lr}"
         )
+
         if save_opt['save_model']['activate'] and epoch % int(save_opt['save_model']['frequency']) == 0 and epoch != 0:
-            temp_config = deepcopy(config)
-
             check_point_save(save_folder=save_dir, epoch=epoch, gen=net_generator, disc=net_discriminator,
-                             gen_optim=optimizer_g, disc_optim=optimizer_d, g_lr=g_lr, d_lr=d_lr, save_opt=save_opt,
-                             test_dataloader=testing_data_loader, config=temp_config,device=device
-                             )
+                             gen_optim=optimizer_g, disc_optim=optimizer_d, g_lr=g_lr, d_lr=d_lr,
+                             save_opt=save_opt,
+                             test_dataloader=testing_data_loader, config=config, device=device)
 
+        if save_opt['save_model']['activate'] and epoch_ms_ssim > best_ms_ssim and epoch != 0:
+            best_ms_ssim = epoch_ms_ssim
+            check_point_save(save_folder=save_dir, epoch=0, gen=net_generator, disc=net_discriminator,
+                             gen_optim=optimizer_g, disc_optim=optimizer_d, g_lr=g_lr, d_lr=d_lr,
+                             save_opt=save_opt,
+                             test_dataloader=testing_data_loader, config=config, device=device)
+
+        loss_dict = {"ms_ssim": epoch_ms_ssim, "ssim": epoch_ssim, "l1": epoch_l1}
+        tensorboard_save(writer,epoch,loss_dict)
+
+    writer.close()
+
+def config_getter():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--yaml', type=str, help='the path of config.yml', default='./config.yml')
+    args = parser.parse_args()
+    config = config_loader(args.yaml)
+    return config
 
 if __name__ == '__main__':
-    run()
+    run(config_getter())

@@ -4,9 +4,8 @@ train_opt:
     # 设置set为true 来人工设置选定的随机seed
     set: true
     num: 123
-  # number of threads for data loader to use
-  num_workers: 6
-  batch_size: 10
+  num_workers: 12
+  batch_size: 60
   channel:
     input: 3
     output: 3
@@ -17,7 +16,7 @@ train_opt:
   G:
     # Number of Generator Filters in first conv layer
     ngf: 64
-    net_G_type: resnet_9blocks
+    net_G_type: link2net50_1m_8s_6block
     # init_type normal xavier kaiming orthogonal
     G_init_type: normal
     use_dropout: false
@@ -35,11 +34,11 @@ train_opt:
     g_loss:
       - name: l1
         # 1e-2 * weight
-        weight: 10
+        weight: 8
       - name: ssim
-        weight: 0
+        weight: 0.1
       - name: ms_ssim
-        weight: 0
+        weight: 0.1
   optim:
     # IMPORTANT: modify it every time resume training value = the last epoch lr
     g_learning_rate: 2e-4
@@ -74,27 +73,24 @@ train_opt:
     cosine:
       # too complicated
       eta_min: 0
-  l1:
-    # 决定l1的比重，也就是MAE的比重
-    weight: 10
   save_opt:
-    root_path: /home/heng/DATA/projects/save_data/pix2pix
+    root_path: /openbayes/home
     save_model:
       activate: true
-      frequency: 2
+      frequency: 100
       save_example:
         activate: true
-        num: 2
+        num: 5
   continue_train_opt:
     activate: false
     g_model_path: path
     d_model_path: path
 dataset_opt:
   # train dataset: {root_path}/{dataset_name}/train}
-  root_path: /home/heng/DATA/datasets/pix2pix
-  use_aug: true
+  root_path: /openbayes/input/input0
   dataset_name: ect-new
   # 对应文件夹下由a文件夹到b文件夹
   direction: b2a
   # 设置为Ture则在训练之前将变换好的图片存在内存中，速度更快但是内存占用更高
   ram_cache: false
+  use_aug: true

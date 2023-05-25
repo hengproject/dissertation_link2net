@@ -61,31 +61,42 @@ class MixedIndicationLoss(nn.Module):
     define the Loss from several indications,like ssim,mae(L1)
     """
 
-    def __init__(self, g_loss):
+    def __init__(self, g_loss,device):
         super().__init__()
+        self.l1 = None
+        self.l1_func = nn.L1Loss()
+        self.ssim = None
+        self.ms_ssim = None
         self.sequence = []
+        self.device = device
         for each in g_loss:
             name = each['name']
             weight = float(each['weight'])
             if name == 'l1':
-                self.sequence.append({"func": nn.L1Loss(), 'weight': weight})
+                self.sequence.append({"func": self.l1_loss, 'weight': weight})
             elif name == 'ssim':
                 self.sequence.append({"func": self.ssim_loss, 'weight': weight})
             elif name == 'ms_ssim':
                 self.sequence.append({"func": self.ms_ssim_loss, 'weight': weight})
 
-    def ssim_loss(self, X, Y):
-        return 1 - SSIM(X, Y, data_range=1)
+    def l1_loss(self,X,Y):
+        self.l1 = self.l1_func(X,Y)
+        return self.l1
 
-    def ms_ssim_loss(self,X,Y):
-        return 1 - MS_SSIM(X, Y, data_range=1)
+    def ssim_loss(self, X, Y):
+        self.ssim = SSIM(X, Y, data_range=1)
+        return 1 - self.ssim
+
+    def ms_ssim_loss(self, X, Y):
+        self.ms_ssim = MS_SSIM(X, Y, data_range=1)
+        return 1 - self.ms_ssim
 
     def __call__(self, tensor_a, tensor_b):
-        total_loss = torch.zeros(1)
+        total_loss = torch.zeros(1).to(self.device)
         for each in self.sequence:
-            print(each)
-            total_loss += each['func'].__call__(tensor_a,tensor_b) * each['weight']
+            total_loss += each['func'].__call__(tensor_a, tensor_b) * each['weight']
         return total_loss
+
 
 if __name__ == '__main__':
     device = 'cuda:0'
@@ -93,7 +104,10 @@ if __name__ == '__main__':
     train_opt = config['train_opt']
     criterionGLoss = MixedIndicationLoss(train_opt['loss']['g_loss']).to(device)
     torch.manual_seed(123)
-    tensor_a = torch.randn((5, 256,256,256))
-    tensor_b = torch.randn((5, 256,256,256))
-    criterion_gloss = criterionGLoss(tensor_a, tensor_b)
-    print( criterion_gloss)
+    tensor_a_ = torch.randn((5, 256, 256, 256))
+    tensor_b_ = torch.randn((5, 256, 256, 256))
+    criterion_gloss = criterionGLoss(tensor_a_, tensor_b_)
+    print(criterion_gloss)
+    print(criterionGLoss.ssim)
+    print(criterionGLoss.ms_ssim)
+    print(criterionGLoss.l1)

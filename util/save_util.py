@@ -48,6 +48,7 @@ def save_model(file_name, model, optimizer, lr):
 def save_gen_model(epoch_folder, epoch, gen, optimizer, lr):
     file_name = os.path.join(epoch_folder, r"gen_model.pth")
     save_model(file_name, model=gen, optimizer=optimizer, lr=lr)
+    if epoch == 0 : epoch = 'best'
     get_logger().info(f"epoch[[{epoch}]] generator model saved to {file_name}")
     return file_name
 
@@ -55,14 +56,16 @@ def save_gen_model(epoch_folder, epoch, gen, optimizer, lr):
 def save_disc_model(epoch_folder, epoch, disc, optimizer, lr):
     file_name = os.path.join(epoch_folder, r"disc_model.pth")
     save_model(file_name, model=disc, optimizer=optimizer, lr=lr)
+    if epoch == 0 : epoch = 'best'
     get_logger().info(f"epoch[[{epoch}]] discriminator model saved to {file_name}")
     return file_name
 
 
-def save_some_example(num, gen, test_dataloader,device, epoch_dir=None ,save=True,ret_result=False):
+def save_some_example(num, gen, test_dataloader,device, epoch_dir=None,save=True,ret_result=False):
     ret = []
     with torch.no_grad():
         gen.eval()
+        gen = gen.to(device)
         # batch[0] (1,3,256,256)
         for i, batch in enumerate(test_dataloader):
             real_a = batch[0].to(device)
@@ -100,9 +103,15 @@ def check_point_save(save_folder, epoch, gen, disc, gen_optim, disc_optim, g_lr,
     epoch_folder = os.path.join(save_folder, str(epoch))
     _init_dir(epoch_folder)
     if example_opt['activate']:
-        save_some_example(example_opt['num'], gen, test_dataloader,device, epoch_folder,)
+        save_some_example(example_opt['num'], gen, test_dataloader,device, epoch_folder)
     g_path = save_gen_model(epoch_folder, epoch, gen, gen_optim, g_lr)
     d_path = save_disc_model(epoch_folder, epoch, disc, disc_optim, d_lr)
     config['train_opt']['continue_train_opt']['g_model_path'] = g_path
     config['train_opt']['continue_train_opt']['d_model_path'] = d_path
     save_yaml(os.path.join(epoch_folder, 'continue_train.yaml'), config)
+
+
+def get_kwarg(**kwargs):
+    return kwargs
+
+

@@ -5,8 +5,8 @@ train_opt:
     set: true
     num: 123
   # number of threads for data loader to use
-  num_workers: 4
-  batch_size: 5
+  num_workers: 2
+  batch_size: 18
   channel:
     input: 3
     output: 3
@@ -17,7 +17,7 @@ train_opt:
   G:
     # Number of Generator Filters in first conv layer
     ngf: 64
-    net_G_type: resnet_9blocks
+    net_G_type: link2net50_1m_16s
     # init_type normal xavier kaiming orthogonal
     G_init_type: normal
     use_dropout: false
@@ -37,9 +37,9 @@ train_opt:
         # 1e-2 * weight
         weight: 10
       - name: ssim
-        weight: 2
+        weight: 0
       - name: ms_ssim
-        weight: 2
+        weight: 0
   optim:
     # IMPORTANT: modify it every time resume training value = the last epoch lr
     g_learning_rate: 2e-4
@@ -81,7 +81,7 @@ train_opt:
     root_path: C:\DATA\projects\dissertation\save_data
     save_model:
       activate: true
-      frequency: 25
+      frequency: 5
       save_example:
         activate: true
         num: 5

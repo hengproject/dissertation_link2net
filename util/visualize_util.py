@@ -1,4 +1,5 @@
 from torchvision import transforms
+
 unloader = transforms.ToPILImage()
 loader = transforms.ToTensor()
 
@@ -11,7 +12,5 @@ def tensor_to_PIL(tensor):
 
 def PIL_to_tensor(image):
     return loader(image)
-
-
 
 

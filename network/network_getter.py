@@ -2,7 +2,7 @@ import torch
 from torch.nn import init
 
 from .discriminator import NLayerDiscriminator
-from .generator import ResnetGenerator
+from .generator import ResnetGenerator, UnetGenerator, LinkNetGenerator, Link2NetGenerator
 from .public import get_norm_layer
 from util.logger_util import get_logger
 
@@ -40,10 +40,39 @@ def define_G(input_nc, output_nc, ngf, netG, norm='batch', use_dropout=False, in
         net = ResnetGenerator(input_nc, output_nc, ngf, norm_layer=norm_layer, use_dropout=use_dropout, n_blocks=9)
     elif netG == 'resnet_6blocks':
         net = ResnetGenerator(input_nc, output_nc, ngf, norm_layer=norm_layer, use_dropout=use_dropout, n_blocks=6)
-    # elif netG == 'unet_128':
-    #     net = UnetGenerator(input_nc, output_nc, 7, ngf, norm_layer=norm_layer, use_dropout=use_dropout)
-    # elif netG == 'unet_256':
-    #     net = UnetGenerator(input_nc, output_nc, 8, ngf, norm_layer=norm_layer, use_dropout=use_dropout)
+    elif netG == 'unet':
+        net = UnetGenerator(input_nc, output_nc, 8, ngf, norm_layer=norm_layer, use_dropout=use_dropout)
+    elif netG == 'linknet':
+        net = LinkNetGenerator(input_nc, output_nc, ngf)
+    elif netG == 'link2net50_1m_8s':
+        net = Link2NetGenerator(input_nc, output_nc, ngf, layer_num=[3,4,6,3],scales=8,base_ngf_multi=1)
+    elif netG == 'link2net50_1m_16s':
+        net = Link2NetGenerator(input_nc, output_nc, ngf, layer_num=[3,4,6,3],scales=16,base_ngf_multi=1)
+    elif netG == 'link2net50_1.5m_2s':
+        net = Link2NetGenerator(input_nc, output_nc, ngf, layer_num=[3,4,6,3],scales=2,base_ngf_multi=1.5)
+    elif netG == 'link2net50_1.5m_8s':
+        net = Link2NetGenerator(input_nc, output_nc, ngf, layer_num=[3,4,6,3],scales=8,base_ngf_multi=1.5)
+    elif netG == 'link2net50_2m_16s':
+        net = Link2NetGenerator(3, 3, layer_num=[3, 4, 6, 3], scales=16, base_ngf_multi=2)
+    elif netG == 'link2net50_4m_16s':
+        net = Link2NetGenerator(3, 3, layer_num=[3, 4, 6, 3], scales=16, base_ngf_multi=4)
+    elif netG == 'link2net101_1m_4s':
+        net = Link2NetGenerator(input_nc, output_nc, ngf,scales=4,layer_num=[3, 4, 23, 3])
+    elif netG == 'link2net50_1m_8s_2block':
+        net = Link2NetGenerator(input_nc, output_nc, ngf, layer_num=[3,4,6,3],scales=8,base_ngf_multi=1,n_layer=2)
+    elif netG == 'link2net50_1m_8s_4block':
+        net = Link2NetGenerator(input_nc, output_nc, ngf, layer_num=[3, 4, 6, 3], scales=8, base_ngf_multi=1, n_layer=4)
+    elif netG == 'link2net50_1m_8s_6block':
+        net = Link2NetGenerator(input_nc, output_nc, ngf, layer_num=[3,4,6,3],scales=8,base_ngf_multi=1,n_layer=6)
+    elif netG == 'link2net50_1m_4s_6block':
+        net = Link2NetGenerator(input_nc, output_nc, ngf, layer_num=[3, 4, 6, 3], scales=4, base_ngf_multi=1, n_layer=6)
+    elif netG == 'link2net50_1m_4s_8block':
+        net = Link2NetGenerator(input_nc, output_nc, ngf, layer_num=[3, 4, 6, 3], scales=4, base_ngf_multi=1, n_layer=8)
+    elif netG == 'link2net50_1.5m_8s_9block':
+        net = Link2NetGenerator(input_nc, output_nc, ngf, layer_num=[3,4,6,3],scales=8,base_ngf_multi=1.5,n_layer=9)
+    elif netG == 'link2net50_1m_16s_2block':
+        net = Link2NetGenerator(input_nc, output_nc, ngf, layer_num=[3,4,6,3],scales=16,base_ngf_multi=1,n_layer=2)
+
     else:
         get_logger().error('Generator model name [%s] is not recognized' % netG)
     return init_net(net, init_type, init_gain, gpu_id)

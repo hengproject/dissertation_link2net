@@ -1,7 +1,12 @@
 import functools
+
+from network.g_nets.link2net import Link2NetEncoder, Link2NetBlock
+from network.g_nets.linknet import LinkEncoder, LinkDecoder
 from util import logger_util
 import torch
 import torch.nn as nn
+from network.g_nets.unet import UnetSkipConnectionBlock
+
 
 
 class ResnetGenerator(nn.Sequential):
@@ -170,9 +175,196 @@ class ResnetBlock(nn.Module):
         return out
 
 
+class UnetGenerator(nn.Module):
+    """Create a Unet-based generator"""
+
+    def __init__(self, input_nc, output_nc, num_downs, ngf=64, norm_layer=nn.BatchNorm2d, use_dropout=False):
+        """Construct a Unet generator
+        Parameters:
+            input_nc (int)  -- the number of channels in input images
+            output_nc (int) -- the number of channels in output images
+            num_downs (int) -- the number of downsamplings in UNet. For example, # if |num_downs| == 7,
+                                image of size 128x128 will become of size 1x1 # at the bottleneck
+            ngf (int)       -- the number of filters in the last conv layer
+            norm_layer      -- normalization layer
+
+        We construct the U-Net from the innermost layer to the outermost layer.
+        It is a recursive process.
+        """
+        super(UnetGenerator, self).__init__()
+        # construct unet structure
+        unet_block = UnetSkipConnectionBlock(ngf * 8, ngf * 8, input_nc=None, submodule=None, norm_layer=norm_layer,
+                                             innermost=True)  # add the innermost layer
+        for i in range(num_downs - 5):  # add intermediate layers with ngf * 8 filters
+            unet_block = UnetSkipConnectionBlock(ngf * 8, ngf * 8, input_nc=None, submodule=unet_block,
+                                                 norm_layer=norm_layer, use_dropout=use_dropout)
+        # gradually reduce the number of filters from ngf * 8 to ngf
+        unet_block = UnetSkipConnectionBlock(ngf * 4, ngf * 8, input_nc=None, submodule=unet_block,
+                                             norm_layer=norm_layer)
+        unet_block = UnetSkipConnectionBlock(ngf * 2, ngf * 4, input_nc=None, submodule=unet_block,
+                                             norm_layer=norm_layer)
+        unet_block = UnetSkipConnectionBlock(ngf, ngf * 2, input_nc=None, submodule=unet_block, norm_layer=norm_layer)
+        self.model = UnetSkipConnectionBlock(output_nc, ngf, input_nc=input_nc, submodule=unet_block, outermost=True,
+                                             norm_layer=norm_layer)  # add the outermost layer
+
+    def forward(self, input):
+        """Standard forward"""
+        return self.model(input)
+
+
+class LinkNetGenerator(nn.Module):
+    def __init__(self, input_nc, output_nc, ngf=64, gan_use=True):
+        """Construct a Linknet-based generator
+
+        Parameters:
+            input_nc (int)      -- the number of channels in input images
+            output_nc (int)     -- the number of channels in output images
+            ngf (int)           -- the number of filters in the last conv layer  --9
+
+        """
+        super().__init__()
+        InConv = [
+            nn.Conv2d(in_channels=input_nc, out_channels=ngf, kernel_size=7, stride=2, padding=3, bias=False),
+            nn.BatchNorm2d(ngf),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        ]
+        self.inConv = nn.Sequential(*InConv)
+
+        self.encoder1 = LinkEncoder(ngf, ngf, 3, 1, 1)
+        self.encoder2 = LinkEncoder(ngf, ngf * 2, 3, 2, 1)
+        self.encoder3 = LinkEncoder(ngf * 2, ngf * 4, 3, 2, 1)
+        self.encoder4 = LinkEncoder(ngf * 4, ngf * 8, 3, 2, 1)
+
+        self.decoder1 = LinkDecoder(ngf, ngf, 3, 1, 1, 0)
+        self.decoder2 = LinkDecoder(ngf * 2, ngf, 3, 2, 1, 1)
+        self.decoder3 = LinkDecoder(ngf * 4, ngf * 2, 3, 2, 1, 1)
+        self.decoder4 = LinkDecoder(ngf * 8, ngf * 4, 3, 2, 1, 1)
+
+        OutConv = [
+            nn.ConvTranspose2d(ngf, ngf // 2, 3, 2, 1, 1),
+            nn.BatchNorm2d(ngf // 2),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(ngf // 2, ngf // 2, 3, 1, 1),
+            nn.BatchNorm2d(ngf // 2),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(ngf // 2, output_nc, 2, 2, 0, 0),
+            nn.Tanh()
+        ]
+        self.outConv = nn.Sequential(*OutConv)
+
+    def forward(self, input):
+        # Initial block
+        x = self.inConv(input)
+        # Encoder blocks
+        e1 = self.encoder1(x)
+        e2 = self.encoder2(e1)
+        e3 = self.encoder3(e2)
+        e4 = self.encoder4(e3)
+        # Decoder blocks
+        # d4 = e3 + self.decoder4(e4)
+        d4 = e3 + self.decoder4(e4)
+        d3 = e2 + self.decoder3(d4)
+        d2 = e1 + self.decoder2(d3)
+        d1 = x + self.decoder1(d2)
+        return self.outConv(d1)
+
+
+class Link2NetGenerator(nn.Module):
+    def __init__(self, input_nc, output_nc, ngf=64, layer_num=None, scales=4, base_ngf_multi=1,n_layer=0,leaky=False):
+        """Construct a Linknet-based generator
+            1m=26w in original paper
+        Parameters:
+            input_nc (int)      -- the number of channels in input images
+            output_nc (int)     -- the number of channels in output images
+            ngf (int)           -- the number of filters in the last conv layer  --9
+            layer_num ([int])   -- the number of res2net layers in the encoder
+            scales (float|int)        -- the number of scales in the Res2Net block -- 4
+
+        """
+        super().__init__()
+        if layer_num is None:
+            layer_num = [3, 4, 6, 3]
+        ngf = int(ngf * base_ngf_multi)
+        InConv = [
+            nn.Conv2d(in_channels=input_nc, out_channels=ngf, kernel_size=7, stride=2, padding=3, bias=False),
+            nn.BatchNorm2d(ngf),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        ]
+        self.inConv = nn.Sequential(*InConv)
+        self.encoder1 = Link2NetEncoder(ngf, ngf, scales=scales,stride=1,n_blocks=layer_num[0])
+        self.encoder2 = Link2NetEncoder(ngf, ngf * 2,scales=scales,stride=2,n_blocks=layer_num[1])
+        self.encoder3 = Link2NetEncoder(ngf * 2, ngf * 4,scales=scales,stride=2,n_blocks=layer_num[2])
+        self.encoder4 = Link2NetEncoder(ngf * 4, ngf * 8,scales=scales,stride=2,n_blocks=layer_num[3])
+
+        blocks = [Link2NetBlock(ngf * 8,leaky=leaky) for _ in range(n_layer)]
+        self.blocks = None
+        if n_layer > 0:
+            self.blocks = nn.Sequential(*blocks)
+
+        self.decoder1 = LinkDecoder(ngf, ngf, 3, 1, 1, 0)
+        self.decoder2 = LinkDecoder(ngf * 2, ngf, 3, 2, 1, 1)
+        self.decoder3 = LinkDecoder(ngf * 4, ngf * 2, 3, 2, 1, 1)
+        self.decoder4 = LinkDecoder(ngf * 8, ngf * 4, 3, 2, 1, 1)
+
+        OutConv = [
+            nn.ConvTranspose2d(ngf, ngf // 2, 3, 2, 1, 1),
+            nn.BatchNorm2d(ngf // 2),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(ngf // 2, ngf // 2, 3, 1, 1),
+            nn.BatchNorm2d(ngf // 2),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(ngf // 2, output_nc, 2, 2, 0, 0),
+            nn.Tanh()
+        ]
+        self.outConv = nn.Sequential(*OutConv)
+
+    def forward(self, input):
+        # Initial block
+        x = self.inConv(input)
+        # Encoder blocks
+        e1 = self.encoder1(x)
+        e2 = self.encoder2(e1)
+        e3 = self.encoder3(e2)
+        e4 = self.encoder4(e3)
+        if self.blocks is not None:
+            e4 = e4 + self.blocks(e4)
+        # Decoder blocks
+        # d4 = e3 + self.decoder4(e4)
+        d4 = e3 + self.decoder4(e4)
+        d3 = e2 + self.decoder3(d4)
+        d2 = e1 + self.decoder2(d3)
+        d1 = x + self.decoder1(d2)
+        return self.outConv(d1)
+
+
 if __name__ == "__main__":
-    dummy_input = torch.ones((1, 3, 256, 256))
-    resnet = ResnetGenerator(3, 3)
-    result = resnet(dummy_input)
+    from torchsummary import summary
+    from util.time_util import time_start,time_end
+    from thop import profile
+    device = 'cuda'
+
+    dummy_input = torch.ones((100,3, 256, 256)).to(device)
+    u_net_gen = UnetGenerator(3, 3, 8).to(device)
+    res_gen =  ResnetGenerator(3, 3).to(device)
+    link_gen = LinkNetGenerator(3, 3).to(device)
+    link2_gen =  Link2NetGenerator(3, 3, 64, layer_num=[3,4,6,3],scales=8,base_ngf_multi=1,n_layer=2).to(device)
+   # gen = link_gen
+    # result = gen(dummy_input)
+    # print(result.shape)
+    # print('link2gen')
+    gen = link2_gen
+    for i in range(20):
+        start = time_start()
+        result = gen(dummy_input)
+        end = time_end(start)
+        print(time_end(start))
     print(result.shape)
-    # print(resnet)
+    # summary(gen,(3,256,256))
+    flops, params = profile(gen, inputs=(dummy_input,))
+    print('FLOPs = ' + str(flops / 1000 ** 3) + 'G')
+    print('Params = ' + str(params / 1000 ** 2) + 'M')
+    # summary(gen,(3,256,256))
+
+

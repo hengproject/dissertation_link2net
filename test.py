@@ -2,9 +2,6 @@ import argparse
 import os.path
 from os.path import join as path_join
 from os import listdir as ls
-
-import torch
-from torch import nn
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from data.ect_dataset import get_test_dataset
@@ -12,7 +9,7 @@ from util.load_util import yaml_plain_loader as config_loader, load_checkpoint_o
 from util.save_util import init_test_save
 from util.load_util import get_device
 from network.network_getter import define_G
-from util.test_util import get_evaluate_indication
+from util.evaluate_util import get_evaluate_indication
 
 
 def run():
@@ -45,14 +42,14 @@ def run():
     ngf = train_opt['G']['ngf']
     net_G_type = train_opt['G']['net_G_type']
     G = define_G(input_channel, output_channel, ngf, net_G_type, norm='batch', gpu_id=device)
-    writer = SummaryWriter(os.path.join(save_dir,'logs'), flush_secs=1)
+    writer = SummaryWriter(os.path.join(save_dir,'test','logs'), flush_secs=1)
     for epoch in epoch_list:
         model_save_path = path_join(save_dir, str(epoch), 'gen_model.pth')
         result_save_path = path_join(test_save_dir, str(epoch))
         load_checkpoint_only_net(model_save_path, G, device)
         ret = get_evaluate_indication(G,test_data_loader,device)
         print(epoch,ret)
-        writer.add_scalars(main_tag='indication', tag_scalar_dict=ret, global_step=epoch)
+        writer.add_scalars(main_tag='test_indication', tag_scalar_dict=ret, global_step=epoch)
 
     writer.close()
 

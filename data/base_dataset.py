@@ -11,7 +11,8 @@ import random
 
 def aug_item_image(a, b, direction,use_augment):
     if use_augment:
-        random_angle = random.uniform(-180, 180)
+        # random_angle = random.uniform(-180, 180)
+        random_angle = random.choice([0,90,-90,180])
         rotate_func = transforms.RandomRotation(degrees=(random_angle, random_angle))
         a = rotate_func(a)
         b = rotate_func(b)
